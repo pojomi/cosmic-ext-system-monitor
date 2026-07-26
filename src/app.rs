@@ -42,7 +42,7 @@ impl cosmic::Application for AppModel {
     ) -> (Self, Task<cosmic::Action<Self::Message>>) {
         let app = AppModel {
             core,
-            button_text: "0%   0.0%   ".to_string(),
+            button_text: "0%    0.0%    ".to_string(),
             ..Default::default()
         };
 
@@ -112,7 +112,7 @@ fn get_mem() -> String {
     let available = get("MemAvailable:");
     let used = total - available;
 
-    format!("{:.1} %   ", 100.0 * used / total)
+    format!("{:.1}%    ", 100.0 * used / total)
 }
 
 fn get_mem_cpu_pct() -> String {
@@ -121,7 +121,7 @@ fn get_mem_cpu_pct() -> String {
     let (t1, i1) = sample_cpu();
     let mem = get_mem();
     format!(
-        "{}   {:.1}%   ",
+        "{}   {:.1}%    ",
         mem,
         100.0 * (1.0 - (i1 - i0) as f64 / (t1 - t0) as f64)
     )
