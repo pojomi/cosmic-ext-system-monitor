@@ -1,50 +1,33 @@
-// SPDX-License-Identifier: GPL-3.0
-
-use crate::config::Config;
-use crate::fl;
-use cosmic::cosmic_config::{self, CosmicConfigEntry};
-use cosmic::iced::platform_specific::shell::wayland::commands::popup::{destroy_popup, get_popup};
-use cosmic::iced::{futures, window::Id, Limits, Subscription};
+// use cosmic::iced::platform_specific::shell::commands::popup::{destroy_popup, get_popup};
+use cosmic::iced::Subscription;
+use cosmic::iced::window::Id;
 use cosmic::prelude::*;
-use cosmic::widget;
-use futures::SinkExt;
+use cosmic::widget::{self, autosize};
+use std::sync::LazyLock;
+use std::time::Duration;
+use std::{fs, thread};
 
-/// The application model stores app-specific state used to describe its interface and
-/// drive its logic.
 #[derive(Default)]
 pub struct AppModel {
-    /// Application state which is managed by the COSMIC runtime.
     core: cosmic::Core,
-    /// The popup id.
     popup: Option<Id>,
-    /// Configuration data that persists between application runs.
-    config: Config,
-    /// Example row toggler.
-    example_row: bool,
+    button_text: String,
 }
 
-/// Messages emitted by the application and its widgets.
 #[derive(Debug, Clone)]
 pub enum Message {
-    TogglePopup,
+    // TogglePopup,
+    UpdateCpuPct,
     PopupClosed(Id),
-    SubscriptionChannel,
-    UpdateConfig(Config),
-    ToggleExampleRow(bool),
 }
 
-/// Create a COSMIC application from the app model
+const AUTOSIZE_MAIN_ID: LazyLock<cosmic::widget::Id> =
+    LazyLock::new(|| cosmic::widget::Id::new("text-widget-id"));
+
 impl cosmic::Application for AppModel {
-    /// The async executor that will be used to run your application's commands.
     type Executor = cosmic::executor::Default;
-
-    /// Data that your application receives to its init method.
     type Flags = ();
-
-    /// Messages which the application and its widgets will emit.
     type Message = Message;
-
-    /// Unique identifier in RDNN (reverse domain name notation) format.
     const APP_ID: &'static str = "com.github.cosmic_ext.SystemMonitor";
 
     fn core(&self) -> &cosmic::Core {
@@ -55,26 +38,13 @@ impl cosmic::Application for AppModel {
         &mut self.core
     }
 
-    /// Initializes the application with any given flags and startup commands.
     fn init(
         core: cosmic::Core,
         _flags: Self::Flags,
     ) -> (Self, Task<cosmic::Action<Self::Message>>) {
-        // Construct the app model with the runtime's core.
         let app = AppModel {
             core,
-            config: cosmic_config::Config::new(Self::APP_ID, Config::VERSION)
-                .map(|context| match Config::get_entry(&context) {
-                    Ok(config) => config,
-                    Err((_errors, config)) => {
-                        // for why in errors {
-                        //     tracing::error!(%why, "error loading app config");
-                        // }
-
-                        config
-                    }
-                })
-                .unwrap_or_default(),
+            button_text: "0.0%   ".to_string(),
             ..Default::default()
         };
 
@@ -85,97 +55,46 @@ impl cosmic::Application for AppModel {
         Some(Message::PopupClosed(id))
     }
 
-    /// Describes the interface based on the current state of the application model.
-    ///
-    /// The applet's button in the panel will be drawn using the main view method.
-    /// This view should emit messages to toggle the applet's popup window, which will
-    /// be drawn using the `view_window` method.
     fn view(&self) -> Element<'_, Self::Message> {
-        self.core
-            .applet
-            .icon_button("display-symbolic")
-            .on_press(Message::TogglePopup)
-            .into()
+        let text_widget = self.core.applet.text(&self.button_text);
+
+        autosize::autosize(text_widget, AUTOSIZE_MAIN_ID.clone()).into()
     }
 
-    /// The applet's popup window will be drawn using this view method. If there are
-    /// multiple poups, you may match the id parameter to determine which popup to
-    /// create a view for.
     fn view_window(&self, _id: Id) -> Element<'_, Self::Message> {
-        let content_list = widget::list_column().add(widget::settings::item(
-            fl!("example-row"),
-            widget::toggler(self.example_row).on_toggle(Message::ToggleExampleRow),
-        ));
-
-        self.core.applet.popup_container(content_list).into()
+        widget::column![].into()
     }
 
-    /// Register subscriptions for this application.
-    ///
-    /// Subscriptions are long-lived async tasks running in the background which
-    /// emit messages to the application through a channel. They may be conditionally
-    /// activated by selectively appending to the subscription batch, and will
-    /// continue to execute for the duration that they remain in the batch.
     fn subscription(&self) -> Subscription<Self::Message> {
-        struct MySubscription;
-
-        Subscription::batch(vec![
-            // Create a subscription which emits updates through a channel.
-            Subscription::run(|| {
-                cosmic::iced::stream::channel(4, move |mut channel: futures::channel::mpsc::Sender<_>| async move {
-                    _ = channel.send(Message::SubscriptionChannel).await;
-
-                    futures::future::pending().await
-                })
-            }),
-            // Watch for application configuration changes.
-            self.core()
-                .watch_config::<Config>(Self::APP_ID)
-                .map(|update| {
-                    // for why in update.errors {
-                    //     tracing::error!(?why, "app config error");
-                    // }
-
-                    Message::UpdateConfig(update.config)
-                }),
-        ])
+        cosmic::iced::time::every(Duration::from_secs(3)).map(|_| Message::UpdateCpuPct)
     }
 
-    /// Handles messages emitted by the application and its widgets.
-    ///
-    /// Tasks may be returned for asynchronous execution of code in the background
-    /// on the application's async runtime. The application will not exit until all
-    /// tasks are finished.
     fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
         match message {
-            Message::SubscriptionChannel => {
-                // For example purposes only.
+            Message::UpdateCpuPct => {
+                self.button_text = get_cpu_pct();
             }
-            Message::UpdateConfig(config) => {
-                self.config = config;
-            }
-            Message::ToggleExampleRow(toggled) => self.example_row = toggled,
-            Message::TogglePopup => {
-                return if let Some(p) = self.popup.take() {
-                    destroy_popup(p)
-                } else {
-                    let new_id = Id::unique();
-                    self.popup.replace(new_id);
-                    let mut popup_settings = self.core.applet.get_popup_settings(
-                        self.core.main_window_id().unwrap(),
-                        new_id,
-                        None,
-                        None,
-                        None,
-                    );
-                    popup_settings.positioner.size_limits = Limits::NONE
-                        .max_width(372.0)
-                        .min_width(300.0)
-                        .min_height(200.0)
-                        .max_height(1080.0);
-                    get_popup(popup_settings)
-                }
-            }
+            // Message::TogglePopup => {
+            //     return if let Some(p) = self.popup.take() {
+            //         destroy_popup(p)
+            //     } else {
+            //         let new_id = Id::unique();
+            //         self.popup.replace(new_id);
+            //         let mut popup_settings = self.core.applet.get_popup_settings(
+            //             self.core.main_window_id().unwrap(),
+            //             new_id,
+            //             None,
+            //             None,
+            //             None,
+            //         );
+            //         popup_settings.positioner.size_limits = Limits::NONE
+            //             .max_width(372.0)
+            //             .min_width(300.0)
+            //             .min_height(200.0)
+            //             .max_height(1080.0);
+            //         get_popup(popup_settings)
+            //     };
+            // }
             Message::PopupClosed(id) => {
                 if self.popup.as_ref() == Some(&id) {
                     self.popup = None;
@@ -188,4 +107,28 @@ impl cosmic::Application for AppModel {
     fn style(&self) -> Option<cosmic::iced::theme::Style> {
         Some(cosmic::applet::style())
     }
+}
+
+fn sample_cpu() -> (u64, u64) {
+    let stat = fs::read_to_string("/proc/stat").unwrap();
+    let v: Vec<u64> = stat
+        .lines()
+        .next()
+        .unwrap()
+        .split_whitespace()
+        .skip(1)
+        .take(8)
+        .map(|s| s.parse().unwrap())
+        .collect();
+    (v.iter().sum(), v[3] + v[4]) // total, idle + iowait
+}
+
+fn get_cpu_pct() -> String {
+    let (t0, i0) = sample_cpu();
+    thread::sleep(Duration::from_secs(1));
+    let (t1, i1) = sample_cpu();
+    format!(
+        "{:.1}%   ",
+        100.0 * (1.0 - (i1 - i0) as f64 / (t1 - t0) as f64)
+    )
 }
