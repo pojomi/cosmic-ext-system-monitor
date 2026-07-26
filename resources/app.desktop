@@ -1,0 +1,14 @@
+[Desktop Entry]
+Name=System Monitor
+Comment=A Cosmic panel applet to monitor system resources
+Type=Application
+Icon=com.github.cosmic_ext.SystemMonitor
+Exec=system-monitor %F
+Terminal=false
+StartupNotify=true
+Categories=COSMIC
+Keywords=COSMIC
+NoDisplay=true
+X-CosmicApplet=true
+X-CosmicHoverPopup=Auto
+MimeType=
