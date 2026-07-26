@@ -1,4 +1,3 @@
-// use cosmic::iced::platform_specific::shell::commands::popup::{destroy_popup, get_popup};
 use cosmic::iced::Subscription;
 use cosmic::iced::window::Id;
 use cosmic::prelude::*;
@@ -16,7 +15,6 @@ pub struct AppModel {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    // TogglePopup,
     UpdateCpuPct,
     PopupClosed(Id),
 }
@@ -44,7 +42,7 @@ impl cosmic::Application for AppModel {
     ) -> (Self, Task<cosmic::Action<Self::Message>>) {
         let app = AppModel {
             core,
-            button_text: "0.0%   ".to_string(),
+            button_text: "0%   0.0%   ".to_string(),
             ..Default::default()
         };
 
@@ -72,29 +70,8 @@ impl cosmic::Application for AppModel {
     fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
         match message {
             Message::UpdateCpuPct => {
-                self.button_text = get_cpu_pct();
+                self.button_text = get_mem_cpu_pct();
             }
-            // Message::TogglePopup => {
-            //     return if let Some(p) = self.popup.take() {
-            //         destroy_popup(p)
-            //     } else {
-            //         let new_id = Id::unique();
-            //         self.popup.replace(new_id);
-            //         let mut popup_settings = self.core.applet.get_popup_settings(
-            //             self.core.main_window_id().unwrap(),
-            //             new_id,
-            //             None,
-            //             None,
-            //             None,
-            //         );
-            //         popup_settings.positioner.size_limits = Limits::NONE
-            //             .max_width(372.0)
-            //             .min_width(300.0)
-            //             .min_height(200.0)
-            //             .max_height(1080.0);
-            //         get_popup(popup_settings)
-            //     };
-            // }
             Message::PopupClosed(id) => {
                 if self.popup.as_ref() == Some(&id) {
                     self.popup = None;
@@ -102,10 +79,6 @@ impl cosmic::Application for AppModel {
             }
         }
         Task::none()
-    }
-
-    fn style(&self) -> Option<cosmic::iced::theme::Style> {
-        Some(cosmic::applet::style())
     }
 }
 
@@ -123,12 +96,33 @@ fn sample_cpu() -> (u64, u64) {
     (v.iter().sum(), v[3] + v[4]) // total, idle + iowait
 }
 
-fn get_cpu_pct() -> String {
+fn get_mem() -> String {
+    let meminfo = fs::read_to_string("/proc/meminfo").unwrap();
+    let get = |key: &str| -> f64 {
+        meminfo
+            .lines()
+            .find(|l| l.starts_with(key))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap()
+            / 1024.0 // kB -> MiB
+    };
+
+    let total = get("MemTotal:");
+    let available = get("MemAvailable:");
+    let used = total - available;
+
+    format!("{:.1} %   ", 100.0 * used / total)
+}
+
+fn get_mem_cpu_pct() -> String {
     let (t0, i0) = sample_cpu();
     thread::sleep(Duration::from_secs(1));
     let (t1, i1) = sample_cpu();
+    let mem = get_mem();
     format!(
-        "{:.1}%   ",
+        "{}   {:.1}%   ",
+        mem,
         100.0 * (1.0 - (i1 - i0) as f64 / (t1 - t0) as f64)
     )
 }
